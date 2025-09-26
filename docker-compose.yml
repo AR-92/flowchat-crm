@@ -1,0 +1,118 @@
+name: twenty
+
+services:
+  server:
+    image: twentycrm/twenty:${TAG:-latest}
+    container_name: twenty-server
+    ports:
+      - "3010:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.crm.rule=Host(`crm.flowchat.info`)"
+      - "traefik.http.routers.crm.entrypoints=websecure"
+      - "traefik.http.routers.crm.tls.certresolver=letsencrypt"
+      - "traefik.http.services.crm.loadbalancer.server.port=3000"
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER}:${PG_DATABASE_PASSWORD}@${PG_DATABASE_HOST}:${PG_DATABASE_PORT}/default
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL}
+      DISABLE_DB_MIGRATIONS: ${DISABLE_DB_MIGRATIONS:-false}
+      DISABLE_CRON_JOBS_REGISTRATION: ${DISABLE_CRON_JOBS_REGISTRATION:-false}
+
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-}
+      STORAGE_S3_NAME: ${STORAGE_S3_NAME:-}
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-}
+
+      IS_AI_ENABLED: ${IS_AI_ENABLED}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY}
+      OPENAI_COMPATIBLE_MODEL_NAMES: ${OPENAI_COMPATIBLE_MODEL_NAMES}
+      DEFAULT_MODEL_ID: ${DEFAULT_MODEL_ID}
+
+      APP_SECRET: ${APP_SECRET}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: always
+    networks:
+      - twenty-net
+
+  worker:
+    image: twentycrm/twenty:${TAG:-latest}
+    container_name: twenty-worker
+    command: ["yarn", "worker:prod"]
+    environment:
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER}:${PG_DATABASE_PASSWORD}@${PG_DATABASE_HOST}:${PG_DATABASE_PORT}/default
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL}
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-}
+      STORAGE_S3_NAME: ${STORAGE_S3_NAME:-}
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-}
+      
+      IS_AI_ENABLED: ${IS_AI_ENABLED}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY}
+      OPENAI_COMPATIBLE_MODEL_NAMES: ${OPENAI_COMPATIBLE_MODEL_NAMES}
+      DEFAULT_MODEL_ID: ${DEFAULT_MODEL_ID}
+      
+      APP_SECRET: ${APP_SECRET}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    depends_on:
+      db:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: always
+    networks:
+      - twenty-net
+
+  db:
+    image: postgres:16
+    container_name: twenty-db
+    environment:
+      POSTGRES_USER: ${PG_DATABASE_USER}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_DATABASE_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+    networks:
+      - twenty-net
+
+  redis:
+    image: redis:7
+    container_name: twenty-redis
+    command: ["--maxmemory-policy", "noeviction"]
+    restart: always
+    networks:
+      - twenty-net
+
+volumes:
+  db-data:
+  server-local-data:
+
+networks:
+  twenty-net:
+    driver: bridge
